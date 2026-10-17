@@ -547,6 +547,9 @@ def _read_dataset(
     # rows; those rows are outside an ``all_a`` query and must not make a
     # scoped research read fail before the scope can remove them.
     if universe and dataset == "daily_bars":
+        # Mainland scope is unconditional, even when permissive reads lack an
+        # instrument catalog and therefore cannot apply lifecycle evidence.
+        df = df.filter(~pl.col("symbol").str.ends_with(".HK"))
         df = apply_universe_filter(
             df,
             config,
@@ -992,6 +995,15 @@ def load(
     if adjust == "total_return" and dataset != "daily_bars":
         raise ReaderError("adjust='total_return' applies to daily_bars only")
 
+    if (
+        symbols
+        and any(symbol.endswith(".HK") for symbol in symbols)
+        and (adjust or effective_universe or resolved_profile)
+    ):
+        raise ReaderError(
+            "HK adjustment and historical-universe queries are not supported; request raw daily bars"
+        )
+
     start_d = _parse_date(start)
     end_d = _parse_date(end)
     as_of_d = _parse_date(as_of)
@@ -1090,6 +1102,15 @@ def load(
         )
     if resolved_profile is not None and dataset == "daily_bars":
         _require_profile_delisting_evidence(cfg, df, resolved_profile, read_context)
+
+    if (
+        adjust
+        and "symbol" in df.columns
+        and df.filter(pl.col("symbol").str.ends_with(".HK")).height
+    ):
+        raise ReaderError(
+            "HK adjustment is not supported; request raw daily bars or select mainland symbols"
+        )
 
     # Intraday datasets join on (symbol, trade_date) like the daily bars do: a
     # corporate action applies to a whole session, so every bar in a day shares

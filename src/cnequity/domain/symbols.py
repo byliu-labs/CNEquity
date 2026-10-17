@@ -132,8 +132,12 @@ def parse_symbol(symbol: str) -> SymbolInfo:
         raise ValueError(f"Invalid symbol format: {symbol}")
     code, exchange = symbol.rsplit(".", 1)
     exchange = exchange.upper()
-    if exchange not in ("SH", "SZ", "BJ"):
+    if exchange not in ("SH", "SZ", "BJ", "HK"):
         raise ValueError(f"Unknown exchange: {exchange}")
+    if exchange == "HK" and (
+        len(code) != 5 or not code.isascii() or not code.isdigit() or int(code) == 0
+    ):
+        raise ValueError(f"HK symbols require a non-zero five-digit code: {symbol}")
     return SymbolInfo(symbol=symbol, code=code, exchange=exchange)
 
 

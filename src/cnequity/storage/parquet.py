@@ -21,6 +21,7 @@ from cnequity.domain.schemas import (
     OPTIONAL_COLUMNS,
     PRIMARY_KEYS,
     SchemaValidationError,
+    daily_bar_currency_expr,
     sanitize_dataset_rows,
     validate_dataframe,
 )
@@ -136,6 +137,11 @@ class StagingWriter:
         spec = DATASETS.get(dataset)
         if spec is None or not spec.partial_rows:
             raise ValueError(f"{dataset} does not accept partial batches")
+        original = df
+        if dataset == "daily_bars" and "symbol" in df.columns:
+            # Upgrade the legacy shape before classifying missing columns. An
+            # unrelated bad price must not make implicit CNY reject the batch.
+            df = df.with_columns(daily_bar_currency_expr(set(df.columns)))
         accepted: list[pl.DataFrame] = []
         rejected: list[pl.DataFrame] = []
         reasons: set[str] = set()
@@ -176,7 +182,7 @@ class StagingWriter:
             )
             quarantine.mkdir(parents=True)
             bad = pl.concat(rejected, how="diagonal_relaxed")
-            write_parquet_atomic(quarantine / "input.parquet", df, compression="zstd")
+            write_parquet_atomic(quarantine / "input.parquet", original, compression="zstd")
             write_parquet_atomic(quarantine / "rejected.parquet", bad, compression="zstd")
             date_col = spec.date_col or spec.partition_col
             days: set[str] = set()

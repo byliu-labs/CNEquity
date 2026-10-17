@@ -66,6 +66,8 @@ def _full_row(dataset: str, **values) -> dict:
             row["amount"] = 1_000.0
         if "pre_close" in row:
             row["pre_close"] = 9.5
+    if dataset == "daily_bars":
+        row["currency"] = "CNY"
     row["source"] = "tdx_protocol"
     row["data_version"] = "v2"
     return {**row, **values}
@@ -154,10 +156,14 @@ def test_health_counts_every_registered_dataset(client):
     assert body["rows"] == 7
 
 
-def test_http_read_returns_a_replayable_receipt_for_the_exact_rows(lake):
+@pytest.mark.parametrize("legacy_currency", [False, True])
+def test_http_read_returns_a_replayable_receipt_for_the_exact_rows(lake, legacy_currency):
     from cnequity.storage.revisions import RevisionStore
 
     files = sorted((lake.curated_root / "daily_bars").rglob("*.parquet"))
+    if legacy_currency:
+        for path in files:
+            pl.read_parquet(path).drop("currency").write_parquet(path)
     committed = RevisionStore(lake.meta_root, lake.curated_root).commit(
         "daily_bars",
         run_id="http-receipt-fixture",
@@ -174,6 +180,7 @@ def test_http_read_returns_a_replayable_receipt_for_the_exact_rows(lake):
     assert response.status_code == 200, response.text
     body = response.json()
     assert len(body["rows"]) == 2
+    assert {row["currency"] for row in body["rows"]} == {"CNY"}
     assert body["receipt"]["replayable"] is True
     assert body["receipt"]["dependencies"]["daily_bars"]["revision_id"] == committed.revision_id
     assert body["receipt"]["coverage"]["row_count"] == 2

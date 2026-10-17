@@ -180,6 +180,8 @@ def _live_only(config: Config, tool: str, reason: str) -> None:
 # as a trend. Both are confident, both are wrong, and neither is visible in the
 # column names — so they go in the one tool every session starts with.
 _CONTRACT = [
+    "Daily-bar price and turnover currencies are in the currency column (CNY or HKD); "
+    "HK stocks currently support raw daily prices only, without adjustment or historical-universe filters.",
     "Prices in `daily_bars` / `minute_bars*` are UNADJUSTED as stored. Pass "
     "adjust='hfq' (or 'qfq') to any bar query that compares prices across time, "
     "or a split will read as a crash. Returned adj_* columns carry "
@@ -402,6 +404,11 @@ def query_bars(
             "Unadjusted prices. Any comparison across an ex-dividend or split "
             "date is wrong without adjust='hfq' or 'qfq'."
         )
+        if "symbol" in df.columns and df.filter(pl.col("symbol").str.ends_with(".HK")).height:
+            payload["warning"] = (
+                "Unadjusted prices; HK adjustment and historical-universe queries are not supported. "
+                "Read currency per row and do not compare across corporate actions without verified factors."
+            )
     elif adjust and "adj_is_exact" in df.columns:
         inexact = int(df.filter(~pl.col("adj_is_exact")).height)
         if inexact:

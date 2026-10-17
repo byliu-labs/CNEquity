@@ -15,8 +15,11 @@ from cnequity.steps.delisted import (
 )
 from cnequity.storage.parquet import StagingWriter
 
+# Legacy source fixtures deliberately omit currency; validation supplies mainland CNY.
 _BAR_COLS = [
-    c for c in DAILY_BARS_SCHEMA if c not in ("source", "data_version", "fetched_at", "pre_close")
+    c
+    for c in DAILY_BARS_SCHEMA
+    if c not in ("source", "data_version", "fetched_at", "pre_close", "currency")
 ]
 
 

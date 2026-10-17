@@ -56,6 +56,7 @@ nav:
       - MCP integration: reference/mcp.md
   - Operations:
       - Runbook: operations/runbook.md
+      - Pop Mart HK daily prices: operations/hk-daily-prices.md
       - Troubleshooting: operations/troubleshooting.md
       - Fetching and source protection: operations/fetch-policy.md
       - Source health: operations/source-health.md

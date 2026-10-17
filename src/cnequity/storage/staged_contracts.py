@@ -305,6 +305,9 @@ def _session_completeness(
         [pl.read_parquet(p, columns=["symbol", "trade_date"]) for p in staged_files],
         how="vertical_relaxed",
     )
+    # A scoped HK download does not assert mainland session completeness.
+    # Retain SH/SZ rows: they are evidence that a missing BJ leg really failed.
+    staged = staged.filter(pl.col("symbol").str.contains(r"\.(SH|SZ|BJ)$"))
     sessions = sorted(set(staged.get_column("trade_date").to_list()))
     sessions = [d for d in sessions if d >= BJ.era("bse").start]
     if not sessions:

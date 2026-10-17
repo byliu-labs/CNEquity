@@ -8,6 +8,7 @@ from cnequity.steps import (  # noqa: F401
     events,
     finalize,
     fundamentals,
+    hk_prices,
     intraday,
     macro_risk,
     newsboard,

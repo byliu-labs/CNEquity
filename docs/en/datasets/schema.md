@@ -173,7 +173,8 @@ would invent point-in-time facts that did not exist then. To fix a stretch of hi
 | close | float64 |  |
 | pre_close | float64 | Nullable. The previous close published by the exchange; on an ex-date this is the ex-rights reference price (see "Previous close" below) |
 | volume | int64 | **Shares** (see "Volume unit" below); guaranteed only for `data_version=v2` |
-| amount | float64 | CNY |
+| amount | float64 | Turnover in the row's `currency` |
+| currency | string | CNY for mainland stocks; explicit HKD for the scoped Pop Mart HK pilot. OHLC prices use the same currency per share |
 | source | string |  |
 | data_version | string | `v2` = volume in shares; `v1` = varies by source, deprecated |
 | fetched_at | timestamp |  |

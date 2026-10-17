@@ -420,6 +420,10 @@ def backfill(
         "option_contracts",
         "futures_minute_bars",
     }
+    if symbols and any(symbol.endswith(".HK") for symbol in symbols):
+        if dataset != "daily_bars":
+            raise click.ClickException("HK support currently covers unadjusted daily_bars only")
+        return _backfill_hk_prices(cfg, symbols, start_str, end_str, plan)
     if (exchanges or refresh) and dataset not in derivatives:
         raise click.ClickException("--exchange / --refresh 只适用于衍生品采集数据集")
     if (force or retry_failed) and dataset != "sector_bars":
@@ -1340,6 +1344,40 @@ def _finish_backfill_run(engine, result: dict) -> dict:
     if persisted is not None:
         result["status"] = persisted["status"]
     return result
+
+
+def _backfill_hk_prices(cfg, symbols, start_str, end_str, plan) -> None:
+    from cnequity.steps.hk_prices import hk_backfill_plan
+
+    allowed = {"dataset", "config_path", "symbols_str", "start_str", "end_str", "plan"}
+    ctx = click.get_current_context()
+    unsupported = [
+        key
+        for key in ctx.params
+        if key not in allowed
+        and ctx.get_parameter_source(key) is click.core.ParameterSource.COMMANDLINE
+    ]
+    if unsupported:
+        raise click.ClickException(f"Unsupported HK options: {', '.join(unsupported)}")
+    start = parse_date_option(start_str, "--start")
+    end = parse_date_option(end_str, "--end")
+    try:
+        payload = hk_backfill_plan(symbols, start, end)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if plan:
+        click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    cfg._backfill_symbols, cfg._backfill_start, cfg._backfill_end = symbols, start, end
+    attach_log_file(cfg, "backfill-hk-prices")
+    engine = JobEngine(cfg)
+    result = engine.run_job(
+        "backfill:hk", trade_date=end, steps=["hk_daily_bars"], backfill=True, finalize_run=False
+    )
+    result = _finish_backfill_run(engine, result)
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    if code := _run_status_exit_code(result["status"]):
+        raise SystemExit(code)
 
 
 def _run_had_step_failure(engine: JobEngine, run_id: str) -> bool:

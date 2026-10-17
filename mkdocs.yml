@@ -121,6 +121,7 @@ nav:
       - MCP 接入: reference/mcp.md
   - 日常运维:
       - 运行手册: operations/runbook.md
+      - 泡泡玛特港股日线: operations/hk-daily-prices.md
       - 故障排查: operations/troubleshooting.md
       - 取数与源保护: operations/fetch-policy.md
       - 数据源健康度: operations/source-health.md

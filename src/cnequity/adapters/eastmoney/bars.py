@@ -30,7 +30,10 @@ from cnequity.domain.units import lots_to_shares
 logger = logging.getLogger(__name__)
 
 _KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-_MARKET = {"SH": "1", "SZ": "0", "BJ": "2"}
+_MARKET = {"SH": "1", "SZ": "0", "BJ": "2", "HK": "116"}
+# Audited HKD common-stock scope. HK also has other currencies and product
+# types; a five-digit code alone cannot establish either fact.
+HKD_PRICE_SYMBOLS = frozenset({"09992.HK"})
 
 # push2 clist live quote fields → tip OHLC. There is no trade_date in the
 # payload; callers stamp the run's session date (same pattern as fund_flow).
@@ -40,13 +43,15 @@ _MAX_CONSECUTIVE_TRANSPORT_FAILURES = 3
 
 def _secid(symbol: str) -> str:
     info = parse_symbol(symbol)
-    return f"{_MARKET.get(info.exchange, '0')}.{info.code}"
+    return f"{_MARKET[info.exchange]}.{info.code}"
 
 
-def _volume_shares(volume: float | None) -> int | None:
+def _volume_shares(volume: float | None, *, exchange: str = "SH") -> int | None:
     if volume is None:
         return None
     try:
+        if exchange == "HK":
+            return finite_int64(volume, minimum=0)
         lots = finite_int64(volume, minimum=0, maximum=(2**63 - 1) // 100)
     except ValueError:
         return None
@@ -130,6 +135,8 @@ def fetch_daily_bars(
     config=None,
     timeout_sec: float | None = None,
     diagnostics: dict | None = None,
+    archive=None,
+    run_id: str | None = None,
 ) -> pl.DataFrame:
     """Per-symbol historical kline (slow). Prefer :func:`fetch_daily_bars_clist` for tip."""
     owns = client is None
@@ -146,8 +153,12 @@ def fetch_daily_bars(
         diagnostics.setdefault("empty_symbols", [])
         diagnostics.setdefault("rows_by_symbol", {})
         diagnostics.setdefault("route_outcomes", {})
+        diagnostics.setdefault("instruments_by_symbol", {})
     try:
         for index, sym in enumerate(symbols):
+            info = parse_symbol(sym)
+            if info.exchange == "HK" and sym not in HKD_PRICE_SYMBOLS:
+                raise ValueError(f"HK currency/type is unverified for {sym}; supported: 09992.HK")
             params = {
                 "secid": _secid(sym),
                 "fields1": "f1,f2,f3,f4,f5,f6",
@@ -160,7 +171,34 @@ def fetch_daily_bars(
             try:
                 resp = client.get(_KLINE_URL, params=params)
                 resp.raise_for_status()
-                klines = (resp.json().get("data") or {}).get("klines") or []
+                if archive is not None:
+                    from cnequity.storage.raw_archive import archive_response
+
+                    archive_response(
+                        archive,
+                        "daily_bars",
+                        resp,
+                        source="eastmoney",
+                        request_params=params,
+                        run_id=run_id,
+                        url=_KLINE_URL,
+                        request_scope=sym,
+                    )
+                data = resp.json().get("data") or {}
+                if info.exchange == "HK" and data:
+                    if data.get("code") != info.code or data.get("market") != 116:
+                        raise ValueError(f"HK kline identity does not match requested symbol {sym}")
+                    if diagnostics is not None:
+                        diagnostics["instruments_by_symbol"][sym] = {
+                            "symbol": sym,
+                            "name": data.get("name"),
+                            "exchange": "HK",
+                            "asset_type": "stock",
+                            "list_date": None,
+                            "delist_date": None,
+                            "prev_symbol": None,
+                        }
+                klines = data.get("klines") or []
             except Exception as exc:
                 logger.warning("EastMoney kline failed for %s: %s", sym, exc)
                 if diagnostics is not None:
@@ -213,13 +251,14 @@ def fetch_daily_bars(
                 low = _to_float(parts[4])
                 volume = _to_float(parts[5])
                 amount = _to_float(parts[6])
-                volume_shares = _volume_shares(volume)
+                volume_shares = _volume_shares(volume, exchange=info.exchange)
                 if None in (open_, close, high, low, volume_shares):
                     rejected += 1
                     continue
                 rows.append(
                     {
                         "symbol": sym,
+                        "currency": "HKD" if info.exchange == "HK" else "CNY",
                         "trade_date": trade_date,
                         "open": open_,
                         "close": close,

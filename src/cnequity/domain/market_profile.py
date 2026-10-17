@@ -103,6 +103,7 @@ PROFILES: dict[str, MarketProfile] = {
     "SH": MarketProfile("SH", (_MAIN,), {}),
     "SZ": MarketProfile("SZ", (_MAIN,), {}),
     "BJ": BJ,
+    "HK": MarketProfile("HK", (MarketEra("hk", None, None, None, "Hong Kong securities"),), {}),
 }
 
 BSE_FIRST_SESSION = BJ.era("bse").start

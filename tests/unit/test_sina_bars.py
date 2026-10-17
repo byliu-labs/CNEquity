@@ -69,6 +69,26 @@ def test_symbol_exists_and_fetch_filters(monkeypatch):
     assert df["amount"][0] is None
 
 
+@pytest.mark.parametrize("symbol", ["600519.SH", "300750.SZ", "920819.BJ"])
+def test_mainland_sina_prices_expose_cny_currency(monkeypatch, symbol):
+    monkeypatch.setattr(
+        sina,
+        "_request",
+        lambda *_: [
+            {
+                "day": "2026-10-09",
+                "open": "10",
+                "high": "11",
+                "low": "9",
+                "close": "10.5",
+                "volume": "1500",
+            }
+        ],
+    )
+    bars = sina.fetch_daily_bars_sina(symbol)
+    assert bars["currency"].to_list() == ["CNY"]
+
+
 def test_recent_window_requests_a_small_tail(monkeypatch):
     seen: list[int] = []
 

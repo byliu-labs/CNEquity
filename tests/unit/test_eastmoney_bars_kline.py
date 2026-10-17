@@ -181,5 +181,5 @@ def test_fetch_daily_bars_closes_owned_client_when_symbol_processing_fails(monke
         lambda symbol: (_ for _ in ()).throw(ValueError("bad symbol")),
     )
     with pytest.raises(ValueError, match="bad symbol"):
-        fetch_daily_bars(["not-a-symbol"], date(2024, 6, 1), date(2024, 6, 28))
+        fetch_daily_bars(["600519.SH"], date(2024, 6, 1), date(2024, 6, 28))
     assert created[0].closed is True

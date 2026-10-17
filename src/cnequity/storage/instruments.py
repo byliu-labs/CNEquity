@@ -161,8 +161,17 @@ def compact_instruments(
         # to be absent.  Counting them in the circuit breaker made a mature
         # catalog look like a partial fetch on every run, eventually masking
         # genuine omissions from the still-live universe.
+        # A scoped registration is not a directory snapshot. Only an exchange
+        # represented by a complete incoming directory can prove an absence.
+        covered_exchanges = (
+            incoming.filter(pl.col("source") != "eastmoney_hk_scoped")
+            .get_column("exchange")
+            .unique()
+            .to_list()
+        )
         expected_live = existing.filter(
-            pl.col("delist_date").is_null() | (pl.col("delist_date") >= trade_date)
+            pl.col("exchange").is_in(covered_exchanges)
+            & (pl.col("delist_date").is_null() | (pl.col("delist_date") >= trade_date))
         )
         absent_live = expected_live.filter(~pl.col("symbol").is_in(incoming_symbols))
         absent_count = absent_live.height

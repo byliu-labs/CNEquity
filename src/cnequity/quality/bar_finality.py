@@ -30,13 +30,27 @@ def daily_bar_finality_findings(config: Config, end: date) -> list[dict]:
     else:
         return []
     local = fetched.dt.convert_time_zone("Asia/Shanghai")
+    from cnequity.domain.hk_market import is_hk_session_final
+
+    # Use the same market finality rule as ingestion, including half sessions.
+    hk_final = pl.struct(
+        pl.col("symbol"), pl.col("trade_date"), fetched.alias("_fetched")
+    ).map_elements(
+        lambda row: (
+            is_hk_session_final(row["trade_date"], row["_fetched"])
+            if row["symbol"].endswith(".HK")
+            else True
+        ),
+        return_dtype=pl.Boolean,
+    )
+    final = (
+        pl.when(pl.col("symbol").str.ends_with(".HK"))
+        .then(hk_final)
+        .otherwise(local.dt.time() >= SESSION_FINAL_AT)
+    )
     suspect = (
         dedupe_lazy_by_primary_key(bars, "daily_bars")
-        .filter(
-            (pl.col("volume") > 0)
-            & (local.dt.date() == pl.col("trade_date"))
-            & (local.dt.time() < SESSION_FINAL_AT)
-        )
+        .filter((pl.col("volume") > 0) & (local.dt.date() == pl.col("trade_date")) & ~final)
         .select("symbol", "trade_date", "fetched_at")
         .collect(engine="streaming")
     )

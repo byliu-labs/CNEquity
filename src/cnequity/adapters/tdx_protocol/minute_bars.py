@@ -42,7 +42,7 @@ import polars as pl
 from cnequity.adapters.numeric import finite_int64
 from cnequity.adapters.tdx_protocol._decode import decoded_quantity_or_none
 from cnequity.adapters.tdx_protocol.history_window import window_pages
-from cnequity.domain.market_profile import EXCHANGES, serves
+from cnequity.domain.market_profile import serves
 from cnequity.domain.rate_limit import RateLimitSpec, source_request_slot_spec, wait_spec
 
 logger = logging.getLogger(__name__)
@@ -210,12 +210,12 @@ def fetch_minute_bars_paginated(
     """
     category = category_for(frequency)
     code, exch = sym.split(".")
-    # An unknown suffix is reported below as such, not as a coverage gap.
-    if exch in EXCHANGES and not serves("tdx_intraday", sym):
-        # TDX has no Beijing route at all — the daily path routes those symbols
-        # to a fallback vendor. There is no intraday fallback, so say so rather
-        # than returning an empty list that reads as "no trading".
-        raise TdxMinuteBarsError(f"{sym}: TDX serves no Beijing-exchange intraday bars")
+    exch = exch.upper()
+    if not serves("tdx_intraday", sym):
+        # Unsupported markets must fail before the SH/SZ wire-code mapping;
+        # otherwise a Hong Kong watchlist silently becomes a Shenzhen request.
+        exchange_name = {"BJ": "Beijing", "HK": "Hong Kong"}.get(exch, exch)
+        raise TdxMinuteBarsError(f"{sym}: TDX serves no {exchange_name}-exchange intraday bars")
     market = 1 if exch == "SH" else 0
 
     all_rows: list[dict] = []

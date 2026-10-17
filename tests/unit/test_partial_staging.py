@@ -63,6 +63,20 @@ def test_clean_batch_writes_no_quality_receipt(tmp_path):
     assert not (tmp_path / "_quarantine").exists()
 
 
+def test_legacy_cny_normalization_does_not_hide_invalid_hk_currency(tmp_path):
+    cfg = Config(data_root=tmp_path)
+    original = _bars(date(2026, 1, 5), [10.0, 10.0]).with_columns(
+        pl.Series("symbol", ["600519.SH", "09992.HK"])
+    )
+    result = write_simple(cfg, "mixed", "daily_bars", original)
+    assert result["rows_written"] == result["rows_rejected"] == 1
+    writer = StagingWriter(cfg.staging_root)
+    staged = pl.read_parquet(writer.list_run_files("daily_bars", "mixed")[0])
+    assert staged.select("symbol", "currency").rows() == [("600519.SH", "CNY")]
+    retained = pl.read_parquet(Path(result["quarantine"]) / "input.parquet")
+    assert retained.equals(original)
+
+
 def test_all_rows_invalid_still_fails_the_batch(tmp_path):
     cfg = Config(data_root=tmp_path)
     with pytest.raises(SchemaValidationError, match="all 2 rows rejected"):

@@ -55,6 +55,7 @@ DAILY_BARS_SCHEMA = {
     "pre_close": pl.Float64,
     "volume": pl.Int64,
     "amount": pl.Float64,
+    "currency": pl.Utf8,
     "source": pl.Utf8,
     "data_version": pl.Utf8,
     "fetched_at": FETCHED_AT_DTYPE,
@@ -900,7 +901,10 @@ DATASET_SCHEMAS = {
     "trading_calendar": TRADING_CALENDAR_SCHEMA,
     "trading_status": TRADING_STATUS_SCHEMA,
     "daily_bars": DAILY_BARS_SCHEMA,
-    "index_bars": {**DAILY_BARS_SCHEMA, "frequency": pl.Utf8},
+    "index_bars": {
+        **{k: v for k, v in DAILY_BARS_SCHEMA.items() if k != "currency"},
+        "frequency": pl.Utf8,
+    },
     "minute_bars": MINUTE_BARS_SCHEMA,
     "minute_bars_5m": MINUTE_BARS_SCHEMA,
     "minute_bars_15m": RESAMPLED_MINUTE_BARS_SCHEMA,
@@ -1044,6 +1048,29 @@ PRIMARY_KEYS = {
 
 class SchemaValidationError(ValueError):
     """Raised when a DataFrame does not match the dataset contract."""
+
+
+def daily_bar_currency_expr(columns: set[str]) -> pl.Expr:
+    """Only legacy mainland rows have a known implicit currency."""
+    legacy = pl.when(pl.col("symbol").str.contains(r"\.(SH|SZ|BJ)$")).then(pl.lit("CNY"))
+    currency = pl.col("currency") if "currency" in columns else pl.lit(None, dtype=pl.Utf8)
+    return pl.coalesce(currency, legacy).alias("currency")
+
+
+def normalize_daily_bar_currency(df: pl.DataFrame) -> pl.DataFrame:
+    if "symbol" not in df.columns:
+        return df
+    df = df.with_columns(daily_bar_currency_expr(set(df.columns)))
+    hk = pl.col("symbol").str.ends_with(".HK")
+    mainland = pl.col("symbol").str.contains(r"\.(SH|SZ|BJ)$")
+    invalid = (hk & (pl.col("currency") != "HKD").fill_null(True)) | (
+        mainland & (pl.col("currency") != "CNY").fill_null(True)
+    )
+    if df.filter(invalid).height:
+        raise SchemaValidationError(
+            "daily_bars currency must be explicit HKD for HK and CNY for mainland stocks"
+        )
+    return df
 
 
 _CORE_BAR_REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -1300,6 +1327,9 @@ def validate_dataframe(
         empty_schema.update({col: PIT_STORAGE_DTYPES[col] for col in pit_passthrough})
         return pl.DataFrame(schema=empty_schema)
 
+    if dataset == "daily_bars":
+        df = normalize_daily_bar_currency(df)
+
     if dataset == "trading_status":
         # Rows written before ST moved out of `status` into its own column are
         # upgraded here rather than at each of the half-dozen read paths
@@ -1482,7 +1512,10 @@ def sanitize_dataset_rows(df: pl.DataFrame, dataset: str) -> pl.DataFrame:
         # the derived calendar and creates false coverage gaps.
         return df.filter(
             (pl.col("trade_date").dt.weekday() <= 5)
-            & ~pl.col("trade_date").dt.strftime("%Y-%m-%d").is_in(CLOSED_DATES)
+            & (
+                pl.col("symbol").str.ends_with(".HK")
+                | ~pl.col("trade_date").dt.strftime("%Y-%m-%d").is_in(CLOSED_DATES)
+            )
         )
     if (
         dataset == "trading_calendar"
