@@ -7,6 +7,7 @@ from datetime import date
 import polars as pl
 
 from cnequity.config import Config
+from cnequity.domain.hk_market import FINAL_AT, HALF_DAY_FINAL_AT, HALF_DAYS
 from cnequity.domain.trading_status import SESSION_FINAL_AT
 from cnequity.query.canonical import dedupe_lazy_by_primary_key
 from cnequity.query.parquet_scan import dataset_has_parquet, scan_parquet_root
@@ -30,12 +31,24 @@ def daily_bar_finality_findings(config: Config, end: date) -> list[dict]:
     else:
         return []
     local = fetched.dt.convert_time_zone("Asia/Shanghai")
+    # Calendar validity is checked separately. This comparison stays native so
+    # masked/null rows do not invoke Python while Polars evaluates predicates.
+    hk_cutoff = (
+        pl.when(pl.col("trade_date").is_in(sorted(HALF_DAYS)))
+        .then(pl.lit(HALF_DAY_FINAL_AT))
+        .otherwise(pl.lit(FINAL_AT))
+    )
+    cutoff = (
+        pl.when(pl.col("symbol").str.ends_with(".HK"))
+        .then(hk_cutoff)
+        .otherwise(pl.lit(SESSION_FINAL_AT))
+    )
     suspect = (
         dedupe_lazy_by_primary_key(bars, "daily_bars")
         .filter(
             (pl.col("volume") > 0)
             & (local.dt.date() == pl.col("trade_date"))
-            & (local.dt.time() < SESSION_FINAL_AT)
+            & (local.dt.time() < cutoff)
         )
         .select("symbol", "trade_date", "fetched_at")
         .collect(engine="streaming")

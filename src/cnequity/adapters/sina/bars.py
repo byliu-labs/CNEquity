@@ -279,6 +279,7 @@ def fetch_daily_bars_sina(
             out.append(
                 {
                     "symbol": symbol,
+                    "currency": "CNY",
                     "trade_date": trade_date,
                     "open": open_,
                     "high": high,

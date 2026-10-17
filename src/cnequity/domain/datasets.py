@@ -60,9 +60,9 @@ DEFAULT_COMPATIBILITY = "additive"
 # the value has not been silently rescaled by the canonical adapter.
 _UNIT_CONTRACT_DEFAULTS: dict[str, UnitContract] = {
     "daily_bars": {
-        "price": "CNY/share",
+        "price": "row.currency/share",
         "volume": "share",
-        "amount": "CNY",
+        "amount": "row.currency",
     },
     "index_bars": {
         "price": "index_point",
@@ -812,6 +812,7 @@ _SPECS = [
     # L1 bars
     DatasetSpec(
         "daily_bars",
+        schema_version=2,
         partial_rows=True,
         primary_source="tdx_protocol",
         backup_source="eastmoney",

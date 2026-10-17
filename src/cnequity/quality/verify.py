@@ -195,6 +195,10 @@ def _covered_days(config: Config, spec: DatasetSpec) -> list[date]:
     )
     if spec.partition_col not in lf.collect_schema().names():
         return []
+    if spec.name == "daily_bars":
+        # This watermark drives mainland ingestion; scoped HK prices cannot
+        # prove that any mainland stock was fetched for the same session.
+        lf = lf.filter(pl.col("symbol").str.contains(r"\.(SH|SZ|BJ)$"))
     return sorted(
         lf.select(spec.partition_col)
         .drop_nulls()

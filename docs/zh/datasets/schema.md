@@ -173,7 +173,8 @@ scripts/migrations/migrate_trading_status_risk_warning.py --config configs/cnequ
 | close | float64 |  |
 | pre_close | float64 | 可空。交易所公布的前收盘；除权日即除权参考价（见下「前收盘」） |
 | volume | int64 | **股**（见下「成交量单位」）；`data_version=v2` 才保证 |
-| amount | float64 | 人民币 |
+| amount | float64 | 成交额，单位取本行 `currency` |
+| currency | string | 大陆股票为 CNY；限定泡泡玛特港股试点须明确为 HKD。OHLC 价格使用相同币种每股 |
 | source | string |  |
 | data_version | string | `v2`=volume 为股；`v1`=按源而异，已弃用 |
 | fetched_at | timestamp |  |

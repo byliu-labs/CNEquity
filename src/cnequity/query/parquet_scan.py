@@ -321,6 +321,17 @@ def scan_parquet_root(
             lf = dedupe_lazy_by_primary_key(lf, "daily_bars")
         if "volume" in columns:
             lf = lf.filter((pl.col("volume") > 0) | pl.col("volume").is_null())
+    if logical_dataset == "daily_bars" and "symbol" in lf.collect_schema().names():
+        from cnequity.domain.schemas import daily_bar_currency_expr, normalize_daily_bar_currency
+
+        lf = lf.with_columns(daily_bar_currency_expr(set(lf.collect_schema().names())))
+        lf = lf.map_batches(
+            normalize_daily_bar_currency,
+            predicate_pushdown=False,
+            projection_pushdown=False,
+            slice_pushdown=False,
+            streamable=True,
+        )
     return lf
 
 

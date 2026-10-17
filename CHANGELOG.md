@@ -2,6 +2,13 @@
 
 这里记录面向用户的主要功能、修复与兼容性变化。历史版本中的命令名反映当时的接口；当前用法以 [CLI 参考](docs/zh/reference/cli.md)为准。升级前阅读[升级与兼容性](docs/zh/getting-started/installation.md#升级与兼容性)。
 
+## [0.17.0] — 2026-10-13
+
+- Add native, explicitly scoped unadjusted HK daily prices for the audited HKD stock Pop Mart (`09992.HK`). The existing `daily_bars` dataset now carries `currency`; legacy mainland rows read as CNY. HK volume is already shares and is not multiplied by 100.
+- Preserve HK prices during mainland holidays, use verified 2026 HK sessions and half-day close buffers, and keep HK observations out of mainland calendar gaps and watermarks. Scoped instrument registration preserves existing mainland identities.
+- Refuse unsupported HK adjustments, mainland research-universe requests and TDX intraday routing. Other HK products/currencies and calendar years remain unsupported pending verified metadata.
+- The daily-price contract advances to schema version 2. See `contracts/migrations/0.17.0/daily_bars.md` and `docs/en/operations/hk-daily-prices.md`.
+
 ## [0.16.0] — 2026-10-08
 
 - **升级步骤：** `pip install -U cnequity` 后重启 `cne serve` 和已在运行的 `cne mcp`。数据集契约没有变化，不需要迁移已有数据，也不需要改配置。

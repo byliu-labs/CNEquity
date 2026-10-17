@@ -138,6 +138,23 @@ def _view_select_sql(
     """
     primary_key = PRIMARY_KEYS.get(name, [])
     source = f"read_parquet({_sql_literal(glob_path)}, hive_partitioning={str(hive).lower()}, union_by_name=true)"
+    if name == "daily_bars" and columns is not None and "symbol" in columns:
+        currency = "currency" if "currency" in columns else "NULL::VARCHAR"
+        legacy = "CASE WHEN regexp_matches(symbol, '\\.(SH|SZ|BJ)$') THEN 'CNY' END"
+        normalized = f"coalesce({currency}, {legacy})"
+        valid_currency = (
+            f"CASE WHEN ends_with(symbol, '.HK') AND ({normalized} IS NULL OR {normalized} <> 'HKD') "
+            "THEN error('daily_bars HK currency must be explicit HKD') "
+            f"WHEN regexp_matches(symbol, '\\.(SH|SZ|BJ)$') AND {normalized} <> 'CNY' "
+            "THEN error('daily_bars mainland currency must be CNY') "
+            "ELSE TRUE END"
+        )
+        projection = "* EXCLUDE (currency)" if "currency" in columns else "*"
+        # A projected currency expression can be pruned by SELECT close/count.
+        # Keep validation in row selection so every raw SQL read checks units.
+        source = (
+            f"(SELECT {projection}, {normalized} AS currency FROM {source} WHERE {valid_currency})"
+        )
     # A few pre-schema-migration fragments in the wild (and lightweight
     # bootstrap fixtures) do not carry provenance. If no provenance field is
     # available, keep the raw view readable and let the schema/quality checks
@@ -280,6 +297,14 @@ def ensure_duckdb_views(config: Config, *, require_data: bool = False) -> Path:
         """
     )
 
+    con.execute("""
+        CREATE OR REPLACE VIEW daily_bars_adjustable AS
+        SELECT * FROM daily_bars
+        WHERE CASE WHEN ends_with(symbol, '.HK')
+            THEN error('HK adjustment is not supported; request raw daily_bars')
+            ELSE TRUE END
+    """)
+
     # Adjusted bars per ADR-0004: only hfq factors are stored.
     #   hfq price = raw * factor
     #   qfq price = raw * factor / anchor   (anchor = latest factor on a bar date)
@@ -297,7 +322,7 @@ def ensure_duckdb_views(config: Config, *, require_data: bool = False) -> Path:
         ),
         bar_anchors AS (
             SELECT symbol, MAX(trade_date) AS anchor_date
-            FROM daily_bars
+            FROM daily_bars_adjustable
             GROUP BY symbol
         ),
         anchors AS (
@@ -319,7 +344,7 @@ def ensure_duckdb_views(config: Config, *, require_data: bool = False) -> Path:
             b.low   * COALESCE(h.factor / a.hfq_anchor, 1.0) AS qfq_low,
             b.close * COALESCE(h.factor / a.hfq_anchor, 1.0) AS qfq_close,
             b.close * COALESCE(h.factor / a.hfq_anchor, 1.0) AS adj_close
-        FROM daily_bars b
+        FROM daily_bars_adjustable b
         LEFT JOIN hfq h
           ON b.symbol = h.symbol AND b.trade_date = h.trade_date
         LEFT JOIN anchors a
@@ -329,6 +354,8 @@ def ensure_duckdb_views(config: Config, *, require_data: bool = False) -> Path:
     # DuckDB views cannot see the outer query's WHERE clause, so a static
     # qfq column cannot be correct for a historical sub-window.  This macro
     # is the SQL equivalent of load(..., adjust='qfq', start=..., end=...).
+    # The shared bars CTE can be materialized before an outer symbol filter.
+    # Guard adjusted outputs, not that CTE, so HK does not break mainland reads.
     con.execute(
         """
         CREATE OR REPLACE MACRO daily_bars_qfq(start_date, end_date) AS TABLE (
@@ -360,15 +387,33 @@ def ensure_duckdb_views(config: Config, *, require_data: bool = False) -> Path:
             SELECT
                 b.*,
                 h.factor IS NOT NULL AS adj_is_exact,
-                b.open  * COALESCE(h.factor, 1.0) AS hfq_open,
-                b.high  * COALESCE(h.factor, 1.0) AS hfq_high,
-                b.low   * COALESCE(h.factor, 1.0) AS hfq_low,
-                b.close * COALESCE(h.factor, 1.0) AS hfq_close,
-                b.open  * COALESCE(h.factor / a.hfq_anchor, 1.0) AS qfq_open,
-                b.high  * COALESCE(h.factor / a.hfq_anchor, 1.0) AS qfq_high,
-                b.low   * COALESCE(h.factor / a.hfq_anchor, 1.0) AS qfq_low,
-                b.close * COALESCE(h.factor / a.hfq_anchor, 1.0) AS qfq_close,
-                b.close * COALESCE(h.factor / a.hfq_anchor, 1.0) AS adj_close
+                CASE WHEN ends_with(b.symbol, '.HK')
+                    THEN error('HK adjustment is not supported; request raw daily_bars')
+                    ELSE b.open  * COALESCE(h.factor, 1.0) END AS hfq_open,
+                CASE WHEN ends_with(b.symbol, '.HK')
+                    THEN error('HK adjustment is not supported; request raw daily_bars')
+                    ELSE b.high  * COALESCE(h.factor, 1.0) END AS hfq_high,
+                CASE WHEN ends_with(b.symbol, '.HK')
+                    THEN error('HK adjustment is not supported; request raw daily_bars')
+                    ELSE b.low   * COALESCE(h.factor, 1.0) END AS hfq_low,
+                CASE WHEN ends_with(b.symbol, '.HK')
+                    THEN error('HK adjustment is not supported; request raw daily_bars')
+                    ELSE b.close * COALESCE(h.factor, 1.0) END AS hfq_close,
+                CASE WHEN ends_with(b.symbol, '.HK')
+                    THEN error('HK adjustment is not supported; request raw daily_bars')
+                    ELSE b.open  * COALESCE(h.factor / a.hfq_anchor, 1.0) END AS qfq_open,
+                CASE WHEN ends_with(b.symbol, '.HK')
+                    THEN error('HK adjustment is not supported; request raw daily_bars')
+                    ELSE b.high  * COALESCE(h.factor / a.hfq_anchor, 1.0) END AS qfq_high,
+                CASE WHEN ends_with(b.symbol, '.HK')
+                    THEN error('HK adjustment is not supported; request raw daily_bars')
+                    ELSE b.low   * COALESCE(h.factor / a.hfq_anchor, 1.0) END AS qfq_low,
+                CASE WHEN ends_with(b.symbol, '.HK')
+                    THEN error('HK adjustment is not supported; request raw daily_bars')
+                    ELSE b.close * COALESCE(h.factor / a.hfq_anchor, 1.0) END AS qfq_close,
+                CASE WHEN ends_with(b.symbol, '.HK')
+                    THEN error('HK adjustment is not supported; request raw daily_bars')
+                    ELSE b.close * COALESCE(h.factor / a.hfq_anchor, 1.0) END AS adj_close
             FROM bars b
             LEFT JOIN hfq h
               ON b.symbol = h.symbol AND b.trade_date = h.trade_date
@@ -386,7 +431,7 @@ def ensure_duckdb_views(config: Config, *, require_data: bool = False) -> Path:
         CREATE OR REPLACE MACRO daily_bars_total_return(start_date, end_date) AS TABLE (
             WITH bars AS (
                 SELECT *
-                FROM daily_bars
+                FROM daily_bars_adjustable
                 WHERE (start_date IS NULL OR trade_date >= CAST(start_date AS DATE))
                   AND (end_date IS NULL OR trade_date <= CAST(end_date AS DATE))
             ),

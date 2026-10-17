@@ -128,14 +128,15 @@ def daily_bars_calendar_findings(config: Config, trade_date: date) -> list[dict]
     bars_root = config.curated_root / "daily_bars"
     if not dataset_has_parquet(bars_root):
         return findings
-    trading_days = _trading_days(config, trade_date)
-    if not trading_days:
-        return findings
-
     bars = dedupe_lazy_by_primary_key(
         scan_parquet_root(bars_root, partition_col="trade_date", end=trade_date),
         "daily_bars",
     )
+    findings.extend(_hk_bar_calendar_findings(bars))
+    bars = bars.filter(~pl.col("symbol").str.ends_with(".HK"))
+    trading_days = _trading_days(config, trade_date)
+    if not trading_days:
+        return findings
     # Aggregate both calendar signals in one streaming pass. The old code
     # collected the same historical daily_bars scan twice (all rows, then
     # traded rows), which made a full health run needlessly amplify its peak
@@ -199,6 +200,32 @@ def daily_bars_calendar_findings(config: Config, trade_date: date) -> list[dict]
             }
         )
     return findings
+
+
+def _hk_bar_calendar_findings(bars: pl.LazyFrame) -> list[dict]:
+    from cnequity.domain.hk_market import is_hk_session
+
+    days = (
+        bars.filter(pl.col("symbol").str.ends_with(".HK"))
+        .select(pl.col("trade_date").unique())
+        .collect()
+        .get_column("trade_date")
+        .to_list()
+    )
+    orphan = sorted(day for day in days if not is_hk_session(day))
+    if not orphan:
+        return []
+    return [
+        {
+            "dataset": "daily_bars",
+            "severity": "error",
+            "check": "daily_bars_calendar_orphan",
+            "exchange": "HK",
+            "message": f"{len(orphan)} HK bar date(s) are not Hong Kong sessions",
+            "orphan_count": len(orphan),
+            "orphan_sample": [day.isoformat() for day in orphan[:_SAMPLE]],
+        }
+    ]
 
 
 def trading_calendar_horizon_findings(config: Config, trade_date: date) -> list[dict]:
@@ -712,7 +739,9 @@ def adj_factor_coverage_findings(config: Config, trade_date: date) -> list[dict]
     if "asset_type" not in instruments.columns:
         return []
     priced_assets = set(
-        instruments.filter(pl.col("asset_type").is_in(["stock", "etf"]))["symbol"].to_list()
+        instruments.filter(
+            pl.col("asset_type").is_in(["stock", "etf"]) & ~pl.col("symbol").str.ends_with(".HK")
+        )["symbol"].to_list()
     )
     if not priced_assets:
         return []
