@@ -7,6 +7,7 @@ from datetime import date
 import polars as pl
 
 from cnequity.config import Config
+from cnequity.domain.hk_market import FINAL_AT, HALF_DAY_FINAL_AT, HALF_DAYS
 from cnequity.domain.trading_status import SESSION_FINAL_AT
 from cnequity.query.canonical import dedupe_lazy_by_primary_key
 from cnequity.query.parquet_scan import dataset_has_parquet, scan_parquet_root
@@ -30,27 +31,25 @@ def daily_bar_finality_findings(config: Config, end: date) -> list[dict]:
     else:
         return []
     local = fetched.dt.convert_time_zone("Asia/Shanghai")
-    from cnequity.domain.hk_market import is_hk_session_final
-
-    # Use the same market finality rule as ingestion, including half sessions.
-    hk_final = pl.struct(
-        pl.col("symbol"), pl.col("trade_date"), fetched.alias("_fetched")
-    ).map_elements(
-        lambda row: (
-            is_hk_session_final(row["trade_date"], row["_fetched"])
-            if row["symbol"].endswith(".HK")
-            else True
-        ),
-        return_dtype=pl.Boolean,
+    # Calendar validity is checked separately. This comparison stays native so
+    # masked/null rows do not invoke Python while Polars evaluates predicates.
+    hk_cutoff = (
+        pl.when(pl.col("trade_date").is_in(sorted(HALF_DAYS)))
+        .then(pl.lit(HALF_DAY_FINAL_AT))
+        .otherwise(pl.lit(FINAL_AT))
     )
-    final = (
+    cutoff = (
         pl.when(pl.col("symbol").str.ends_with(".HK"))
-        .then(hk_final)
-        .otherwise(local.dt.time() >= SESSION_FINAL_AT)
+        .then(hk_cutoff)
+        .otherwise(pl.lit(SESSION_FINAL_AT))
     )
     suspect = (
         dedupe_lazy_by_primary_key(bars, "daily_bars")
-        .filter((pl.col("volume") > 0) & (local.dt.date() == pl.col("trade_date")) & ~final)
+        .filter(
+            (pl.col("volume") > 0)
+            & (local.dt.date() == pl.col("trade_date"))
+            & (local.dt.time() < cutoff)
+        )
         .select("symbol", "trade_date", "fetched_at")
         .collect(engine="streaming")
     )

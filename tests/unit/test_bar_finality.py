@@ -43,3 +43,56 @@ def test_latest_final_observation_supersedes_early_duplicate(tmp_path):
     cfg = Config(data_root=tmp_path)
     _write(cfg, [_bar(2), _bar(8)])
     assert daily_bar_finality_findings(cfg, date(2026, 7, 6)) == []
+
+
+def test_mixed_market_finality_handles_masked_and_missing_identifiers(tmp_path):
+    cfg = Config(data_root=tmp_path)
+    _write(
+        cfg,
+        [
+            _bar(8, symbol="600519.SH"),
+            {**_bar(8, symbol="09992.HK"), "currency": "HKD"},
+            _bar(8, symbol=None),
+        ],
+    )
+    findings = daily_bar_finality_findings(cfg, date(2026, 7, 6))
+    assert len(findings) == 1
+    assert findings[0]["sample"][0]["symbol"] == "09992.HK"
+
+
+@pytest.mark.parametrize("minute,expected", [(14, 1), (15, 0)])
+def test_hk_half_session_auction_buffer_boundary(tmp_path, minute, expected):
+    cfg = Config(data_root=tmp_path)
+    day = date(2026, 12, 24)
+    _write(
+        cfg,
+        [
+            {
+                "symbol": "09992.HK",
+                "currency": "HKD",
+                "trade_date": day,
+                "volume": 100,
+                "fetched_at": datetime(2026, 12, 24, 4, minute, tzinfo=timezone.utc),
+            }
+        ],
+    )
+    assert len(daily_bar_finality_findings(cfg, day)) == expected
+
+
+def test_unknown_hk_calendar_year_does_not_crash_clock_audit(tmp_path):
+    cfg = Config(data_root=tmp_path)
+    day = date(2027, 1, 4)
+    _write(
+        cfg,
+        [
+            {
+                "symbol": "09992.HK",
+                "currency": "HKD",
+                "trade_date": day,
+                "volume": 100,
+                "fetched_at": datetime(2027, 1, 4, 9, tzinfo=timezone.utc),
+            }
+        ],
+    )
+    # Calendar coverage has its own fail-closed check. This audit checks clocks.
+    assert daily_bar_finality_findings(cfg, day) == []
