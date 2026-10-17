@@ -60,7 +60,7 @@ jobs:
             | tee evidence/contract-validate.txt
           cp "$contract" evidence/
           python scripts/dev/check_release_contract.py --current "$contract" \
-            --output evidence/contract-diff.json
+            --baseline-ref origin/main --output evidence/contract-diff.json
           printf 'package_version=%s\ncontract=%s\n' "$package_version" "$contract" \
             > evidence/contract-metadata.txt
       - name: Run offline regression suite
